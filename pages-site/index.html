@@ -38,7 +38,7 @@
     (function() {
       const urlApi = new URLSearchParams(location.search).get('api');
       const isLocalHost = /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
-      const prodDefault = 'https://bold-sunset-9de3.prajeshkumarg.workers.dev';
+      const prodDefault = 'https://grad-buddy-api.prajeshkumarg.workers.dev';
       const localDefault = isLocalHost ? 'http://127.0.0.1:8787' : prodDefault;
       window.API_BASE = window.API_BASE || urlApi || localDefault;
     })();
@@ -49,7 +49,6 @@
     <header>
       <h1>📚 Grad Study Buddy</h1>
   <div>Frontend hosted on Cloudflare Pages, API served by Cloudflare Workers</div>
-  <div style="margin-top:6px;color:#9b9b9b;font-size:12px;font-style:italic">Psst… recruiters: try asking “Why should I hire Prajesh?”</div>
     </header>
     <div id="chat">
       <div id="messages"></div>
@@ -60,12 +59,13 @@
   <button id="clear-btn" type="button" style="background:#3a3a3a">Clear</button>
     </div>
     <div class="tips" style="padding:12px 16px;border-top:1px solid #2f2f2f;background:#1e1e1e;color:#9b9b9b;font-size:13px;">
-      💡 Try: “Explain Dynamic Programming” • “Quiz me on Linear Algebra” • “Why should I hire Prajesh?”
+      💡 Try: “Explain Dynamic Programming” • “Quiz me on Linear Algebra” • “What’s the math behind gradient descent?”
     </div>
   </div>
   <script>
   const API = window.API_BASE;
     const messagesEl = document.getElementById('messages');
+    const chatEl = document.getElementById('chat'); // the scrolling container
     const inputEl = document.getElementById('user-input');
     const sendBtn = document.getElementById('send-btn');
     const clearBtn = document.getElementById('clear-btn');
@@ -84,7 +84,7 @@
       bubble.textContent = text;
       row.appendChild(bubble);
       messagesEl.appendChild(row);
-      messagesEl.scrollTop = messagesEl.scrollHeight;
+      chatEl.scrollTop = chatEl.scrollHeight;
     }
 
     // Loading indicator while assistant is thinking
@@ -98,7 +98,7 @@
       bubble.innerHTML = '<span class="loading"><span class="dot"></span><span class="dot"></span><span class="dot"></span></span>';
       row.appendChild(bubble);
       messagesEl.appendChild(row);
-      messagesEl.scrollTop = messagesEl.scrollHeight;
+      chatEl.scrollTop = chatEl.scrollHeight;
       loadingRow = row;
     }
     function removeLoading() {
@@ -106,6 +106,33 @@
         loadingRow.remove();
         loadingRow = null;
       }
+    }
+
+    // Parses a Server-Sent Events stream from the Worker and calls
+    // onEvent(name, data) for each complete event.
+    async function readEventStream(res, onEvent) {
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      const dispatch = (raw) => {
+        let event = 'message', data = '';
+        for (const line of raw.split('\n')) {
+          if (line.startsWith('event:')) event = line.slice(6).trim();
+          else if (line.startsWith('data:')) data += line.slice(5).trim();
+        }
+        if (data) onEvent(event, JSON.parse(data));
+      };
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true }).replace(/\r/g, '');
+        let end;
+        while ((end = buffer.indexOf('\n\n')) !== -1) {
+          dispatch(buffer.slice(0, end));
+          buffer = buffer.slice(end + 2);
+        }
+      }
+      if (buffer.trim()) dispatch(buffer);
     }
 
     async function send() {
@@ -116,15 +143,34 @@
       inputEl.value = '';
       sendBtn.disabled = true;
       showLoading();
+      let bubble = null; // assistant bubble, created on the first token
       try {
-        const res = await fetch(API + '/api/chat', {
+        const res = await fetch(API + '/api/chat/stream', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ message: msg, userId })
         });
-        const data = await res.json();
+        const type = res.headers.get('Content-Type') || '';
+        if (!res.ok || !type.includes('text/event-stream') || !res.body) {
+          const data = await res.json().catch(() => null);
+          removeLoading();
+          addMsg('Error: ' + (data && data.error || ('HTTP ' + res.status)), 'assistant');
+          return;
+        }
+        await readEventStream(res, (event, data) => {
+          if (event === 'token') {
+            if (!bubble) {
+              removeLoading();
+              addMsg('', 'assistant');
+              bubble = messagesEl.lastElementChild.querySelector('.bubble');
+            }
+            bubble.textContent += data.token;
+            chatEl.scrollTop = chatEl.scrollHeight;
+          } else if (event === 'error') {
+            removeLoading();
+            addMsg('Error: ' + data.error, 'assistant');
+          }
+        });
         removeLoading();
-        if (data && data.success) addMsg(data.response, 'assistant');
-        else addMsg('Error: ' + (data && data.error || 'Unknown error'), 'assistant');
       } catch (e) {
         removeLoading();
         addMsg('Network error talking to API at ' + API, 'assistant');

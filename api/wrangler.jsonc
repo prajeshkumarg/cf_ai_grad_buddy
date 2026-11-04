@@ -1,5 +1,5 @@
 {
-  "name": "bold-sunset-9de3",
+  "name": "grad-buddy-api",
   "main": "src/worker.js",
   "workers_dev": true,
   "preview_urls": false,

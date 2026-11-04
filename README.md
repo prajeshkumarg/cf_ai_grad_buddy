@@ -1,7 +1,7 @@
 
 # 📚 Grad Study Buddy
 
-An AI-powered study assistant built with **Cloudflare Workers AI**, featuring an interactive chat interface and conversation memory. This project demonstrates a complete AI application using Cloudflare's serverless platform.
+An AI-powered study assistant built with **Cloudflare Workers AI**, featuring an interactive chat interface and conversation memory. Replies stream token by token, and each user's recent conversation is kept as context for follow-up questions.
 
 [![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-orange)](https://workers.cloudflare.com/)
 [![Workers AI](https://img.shields.io/badge/Workers-AI-blue)](https://developers.cloudflare.com/workers-ai/)
@@ -18,15 +18,13 @@ Bot: [Provides detailed explanation with examples]
 
 You: "Give me a practice problem"
 Bot: [Creates a custom DP problem]
-
-You: "Why should I hire Prajesh?"
-Bot: [Special recruiter pitch with experience]
 ```
 
 ## 🎯 Features
 
 - **🤖 AI-Powered Learning**: Uses Llama 3.3 70B Instruct for intelligent tutoring
 - **💬 Interactive Chat Interface**: Beautiful Notion-inspired dark mode UI
+- **⚡ Streaming Responses**: Replies stream token by token over Server-Sent Events (SSE)
 - **🧠 Conversation Memory**: Maintains context across sessions using KV storage
 - **📱 Responsive Design**: Works seamlessly on desktop and mobile
 - **⚡ Serverless Architecture**: Built entirely on Cloudflare's edge network
@@ -34,9 +32,8 @@ Bot: [Special recruiter pitch with experience]
 
 ## 🏗️ Architecture
 
-This project demonstrates all components of a production AI application:
 
-### 1️⃣ **LLM Integration** ✅
+### LLM inference
 
 The worker calls **Llama 3.3 70B Instruct** via the Workers AI binding:
 
@@ -55,19 +52,21 @@ const assistantMessage = aiResponse.response;
 **Location**: `src/worker.js` (lines 77-84)  
 **Model**: Llama 3.3 70B Instruct (FP8 Fast variant for optimal performance)
 
-### 2️⃣ **Workflow / Coordination** ✅
+### Request handling
 
 The Worker coordinates the entire application flow:
-- **Request Routing**: Handles chat, history, and clear operations
+- **Request Routing**: Handles chat, streaming chat, history, and clear operations
+- **Streaming Relay**: Parses the Workers AI token stream and re-emits it to the browser as SSE, saving the full reply to KV when generation finishes
 - **Message Processing**: Builds conversation context with system prompts
 - **State Management**: Manages conversation history and persistence
 
 **Key Functions**:
-- `handleChat()` - Main conversation handler with AI integration
+- `handleChat()` - Conversation handler returning the full reply as JSON
+- `handleChatStream()` - Streaming conversation handler (SSE)
 - `handleClear()` - History management
 - `handleGetHistory()` - Debug endpoint for conversation inspection
 
-### 3️⃣ **User Input (Chat Interface) — Cloudflare Pages** ✅
+### Chat UI (Cloudflare Pages)
 
 The frontend is served by Cloudflare Pages at `pages-site/index.html` and talks to the Worker API. It includes:
 - Real-time message display with smooth animations
@@ -90,16 +89,15 @@ await fetch(`${API}/api/chat`, {
 ```
 
 Tip: During local development, run both in separate terminals:
-- Worker API: `wrangler dev` (in `bold-sunset-9de3/`)
+- Worker API: `wrangler dev` (in `api/`)
 - Pages UI: `wrangler pages dev ./pages-site` (at repo root)
 
 **Try These Commands**:
 - `"Explain photosynthesis"`
 - `"Quiz me on linear algebra"`
 - `"What's the math behind gradient descent?"`
-- `"Why should I hire Prajesh?"` 😉
 
-### 4️⃣ **Memory / State** ✅
+### Conversation memory
 
 Uses **Cloudflare KV** for persistent conversation storage:
 
@@ -125,8 +123,8 @@ await env.STUDY_DATA.delete(historyKey);
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/grad-study-buddy.git
-cd grad-study-buddy/bold-sunset-9de3
+git clone https://github.com/prajeshkumarg/cf_ai_grad_buddy.git
+cd cf_ai_grad_buddy/api
 ```
 
 ### 2. Install Wrangler
@@ -157,15 +155,15 @@ Your `wrangler.json` should include:
 
 Run the Worker API and the Pages UI in two terminals:
 
-Terminal 1 — Worker API (in `bold-sunset-9de3`):
+Terminal 1 — Worker API (in `api`):
 ```zsh
-cd bold-sunset-9de3
+cd api
 wrangler dev
 ```
 
 Terminal 2 — Pages UI (from repo root):
 ```zsh
-cd /Users/gprajeshkumar/dev/cf_ai_grad_buddy
+# from the repo root
 wrangler pages dev ./pages-site --port 8788
 ```
 
@@ -186,7 +184,7 @@ wrangler kv:namespace create "STUDY_DATA"
 
 Copy the namespace ID from the output:
 ```
-🌀 Creating namespace with title "bold-sunset-9de3-STUDY_DATA"
+🌀 Creating namespace with title "grad-buddy-api-STUDY_DATA"
 ✨ Success!
 Add the following to your wrangler.json:
 { binding = "STUDY_DATA", id = "abc123..." }
@@ -209,7 +207,7 @@ Add the namespace ID to `wrangler.json`:
 ### Step 3: Deploy the Worker (API)
 
 ```zsh
-cd bold-sunset-9de3
+cd api
 wrangler deploy
 ```
 
@@ -222,7 +220,7 @@ https://<your-worker>.workers.dev
 
 From the repo root, publish the static site in `pages-site/`:
 ```zsh
-cd /Users/gprajeshkumar/dev/cf_ai_grad_buddy
+# from the repo root
 wrangler pages publish ./pages-site --project-name grad-buddy-ui
 ```
 
@@ -231,30 +229,59 @@ The Pages UI will call your Worker API automatically in production. If you need 
 ## 📁 Project Structure
 
 ```
-bold-sunset-9de3/
-├── src/
-│   ├── worker.js           # Main worker logic & API endpoints
-│   └── html_template.js    # Chat UI (HTML/CSS/JS)
-├── wrangler.json           # Cloudflare configuration
-└── README.md               # This file
+api/                        # Worker API (deployed as grad-buddy-api)
+├── src/worker.js           # Routes, Workers AI calls, SSE streaming relay, KV memory
+├── test/stream.test.js     # Unit tests with mocked AI and KV bindings
+├── wrangler.jsonc          # Worker configuration (AI binding, KV namespace)
+└── package.json
+pages-site/
+└── index.html              # Chat UI (HTML/CSS/JS) served by Cloudflare Pages
 ```
 
 ### File Breakdown
 
-**`src/worker.js`** (Main Application Logic)
-- Routes: `/`, `/api/chat`, `/api/clear`, `/api/history`
-- AI integration with Llama 3.3
-- KV storage management
+**`api/src/worker.js`** (API)
+- Routes: `/api/chat`, `/api/chat/stream`, `/api/clear`, `/api/history`
+- Llama 3.3 70B via Workers AI, streamed to the browser as SSE
+- KV conversation memory with a 20-message window and 7-day TTL
 - CORS handling
 
-**`src/html_template.js`** (Frontend)
+**`pages-site/index.html`** (Frontend)
 - Notion-inspired dark mode design
-- Real-time chat interface
+- Streaming chat interface (renders tokens as they arrive)
 - LocalStorage for user ID persistence
 - Responsive mobile layout
 
+## 🧪 Testing
+
+The Worker has unit tests that run in plain Node (18+) with mocked Workers AI and KV bindings, no Cloudflare account needed:
+
+```zsh
+cd api
+npm test
+```
+
+They cover token ordering, events split across network chunks (including multi-byte characters), CRLF streams, malformed lines, history capping, empty model output and bad requests.
 
 ## 🧪 API Reference
+
+### `POST /api/chat/stream`
+Send a message and receive the reply as it is generated, as Server-Sent Events (`Content-Type: text/event-stream`). The Pages UI uses this route.
+
+**Request Body**: same as `/api/chat`.
+
+**Events**:
+```
+event: token
+data: {"token":"Photo"}
+
+event: token
+data: {"token":"synthesis is"}
+
+event: done
+data: {"historyLength":4}
+```
+If generation fails mid-stream, an `event: error` with `{"error": "..."}` is sent instead of `done`.
 
 ### `POST /api/chat`
 Send a message to the AI assistant.
